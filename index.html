@@ -4,7 +4,10 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>NMMUN'27 | Narsee Monjee Model United Nations</title>
-  <meta name="description" content="NMMUN'27, the 18th edition of Narsee Monjee Model United Nations at NMIMS Shirpur. Two days of debate, diplomacy and resolutions. Register as a delegate.">
+  <meta name="description" content="NMMUN'27, the 17th edition of Narsee Monjee Model United Nations at NMIMS Shirpur. Two days of debate, diplomacy and resolutions. Register as a delegate.">
+  <meta property="og:title" content="NMMUN'27 | Narsee Monjee Model United Nations">
+  <meta property="og:description" content="The world is on the agenda. Take your seat. 16 and 17 January 2027, NMIMS Shirpur.">
+  <meta property="og:type" content="website">
   <meta name="theme-color" content="#0b1f3f">
   <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' fill='%230b1f3f'/%3E%3Cpath d='M6 22 16 8l10 14z' fill='%23fafaf5'/%3E%3C/svg%3E">
   <link rel="preconnect" href="https://fonts.googleapis.com">
@@ -29,7 +32,7 @@
     <div class="hero__head">
       <h1 class="hero__title">NMMUN<span class="hero__year">'27</span></h1>
       <p class="hero__full">Narsee Monjee Model United Nations</p>
-      <p class="hero__edition">Eighteenth edition</p>
+      <p class="hero__edition">Seventeenth edition</p>
     </div>
 
     <div class="hero__grid">
@@ -44,26 +47,38 @@
         <p class="hero__tagline">The world is on the agenda. Take your seat.</p>
 
         <div class="hero__actions">
-          <a class="cta" id="registerBtn" href="#register">Register as a delegate</a>
+          <a class="cta" id="registerBtn" href="#register" data-register>Register as a delegate</a>
           <p class="rollcall" id="rollcall" aria-live="polite"></p>
         </div>
       </div>
 
       <!-- The placard: the visitor makes it their own -->
       <div class="placard-wrap">
-        <canvas class="globe" id="globe" aria-hidden="true"></canvas>
+        <div class="globe-stage">
+          <canvas class="globe" id="globe" aria-hidden="true"></canvas>
+          <span class="globe-tip" id="globeTip" hidden></span>
+        </div>
         <div class="placard" aria-live="polite">
           <p class="placard__label">The delegate of</p>
           <p class="placard__country" id="placardCountry">Your country</p>
           <p class="placard__name" id="placardName">Your name here</p>
         </div>
         <form class="placard-form" id="placardForm" autocomplete="off">
-          <p class="placard-form__hint">Try your placard on before you register.</p>
+          <p class="placard-form__hint">Drag the globe and click a country, or choose one here.</p>
           <label for="delegateName">Your name</label>
           <input id="delegateName" name="delegateName" type="text" maxlength="28" placeholder="Type your name">
           <label for="delegateCountry">Country you would represent</label>
           <select id="delegateCountry" name="delegateCountry"></select>
         </form>
+        <div class="brief" id="brief" hidden aria-live="polite">
+          <p class="brief__title">Country brief: <span id="briefName"></span></p>
+          <dl>
+            <div><dt>Capital</dt><dd id="briefCapital"></dd></div>
+            <div><dt>Region</dt><dd id="briefRegion"></dd></div>
+            <div><dt>UN group</dt><dd id="briefGroup"></dd></div>
+            <div><dt>Land neighbours</dt><dd id="briefBorders"></dd></div>
+          </dl>
+        </div>
       </div>
     </div>
   </header>
@@ -82,6 +97,27 @@
           <figcaption><span>The host city</span>Shirpur, Maharashtra</figcaption>
         </figure>
       </div>
+      <div class="film">
+        <h3>A look back at NMMUN'25</h3>
+        <p class="film__lead">The sixteenth edition, 18 and 19 January 2025, at the Shirpur campus.</p>
+        <div class="film__frame">
+          <video id="film" playsinline preload="none" width="854" height="480" poster="assets/nmmun25-film-poster.jpg" aria-label="NMMUN 2025 highlights film">
+            <source src="assets/nmmun25-film.mp4" type="video/mp4">
+          </video>
+          <button class="film__btn" id="filmToggle" type="button" aria-label="Play the film">
+            <svg class="film__icon-play" viewBox="0 0 24 24" aria-hidden="true"><path d="M8 5.5v13l11-6.5z" fill="currentColor"/></svg>
+            <svg class="film__icon-pause" viewBox="0 0 24 24" aria-hidden="true"><path d="M7 5h3.5v14H7zM13.5 5H17v14h-3.5z" fill="currentColor"/></svg>
+          </button>
+          <button class="film__sound" id="filmSound" type="button" hidden>Turn sound on</button>
+        </div>
+        <ul class="film__facts">
+          <li>Seven committees</li>
+          <li>Delegates from across India</li>
+          <li>Best Delegate awards in every committee</li>
+        </ul>
+        <p class="film__credit">Film by the NMMUN team, @narseemonjeemun</p>
+      </div>
+
       <div class="days">
         <h3>The two days at a glance</h3>
         <div class="days__grid">
@@ -108,7 +144,7 @@
       </div>
 
       <ul class="record" aria-label="NMMUN on record">
-        <li><strong>18th</strong> edition of the conference</li>
+        <li><strong>17th</strong> edition of the conference</li>
         <li><strong>2,000+</strong> delegates since the first edition</li>
         <li><strong>₹1 lakh</strong> in prizes across committees</li>
         <li><strong>7</strong> committees, from UN councils to the Lok Sabha</li>
@@ -132,7 +168,7 @@
           <p class="quiz__committee" id="quizCommittee"></p>
           <p id="quizWhy"></p>
           <div class="quiz__again">
-            <a class="cta cta--small" href="#register" id="registerBtn2">Register as a delegate</a>
+            <a class="cta cta--small" href="#register" id="registerBtn2" data-register>Register as a delegate</a>
             <button type="button" class="link-btn" id="quizRestart">Answer again</button>
           </div>
         </div>
@@ -168,21 +204,48 @@
       <div class="foot__cta">
         <p class="foot__head">The floor is yours</p>
         <p>16 and 17 January 2027</p>
-        <a class="cta cta--small" href="#register" id="registerBtn3">Register as a delegate</a>
+        <a class="cta cta--small" href="#register" id="registerBtn3" data-register>Register as a delegate</a>
       </div>
     </div>
     <p class="foot__note">Dates, theme, schedule and agendas shown here are provisional until the official NMMUN'27 announcement. Built for the NMMUN technical organising committee task.</p>
   </footer>
 
-  <!-- Shown when registration link is not live yet -->
+  <!-- Registration dialog: opened by every "Register as a delegate" button -->
   <dialog class="seat" id="seatDialog" aria-labelledby="seatTitle">
-    <h2 id="seatTitle">Your seat is noted</h2>
-    <p id="seatText"></p>
-    <p>Registration opens with the official announcement. Keep an eye on the NMMUN page.</p>
-    <form method="dialog"><button class="cta cta--small">Close</button></form>
+    <form class="seat__form" id="seatForm">
+      <h2 id="seatTitle">Reserve your seat</h2>
+      <p class="seat__lead">Tell us who is taking the floor. You get your delegate pass straight away.</p>
+      <div class="seat__fields">
+        <label for="seatName">Full name</label>
+        <input id="seatName" name="name" type="text" maxlength="40" required autocomplete="name">
+        <label for="seatEmail">Email</label>
+        <input id="seatEmail" name="email" type="email" maxlength="80" required autocomplete="email">
+        <label for="seatCollege">School or college</label>
+        <input id="seatCollege" name="college" type="text" maxlength="80" required autocomplete="organization">
+        <label for="seatCountry">Country you would like to represent</label>
+        <select id="seatCountry" name="country"></select>
+        <label for="seatCommittee">Committee preference</label>
+        <select id="seatCommittee" name="committee"></select>
+      </div>
+      <p class="seat__note">Your details are used only for NMMUN registration.</p>
+      <div class="seat__actions">
+        <button class="cta cta--small" id="seatSubmit" type="submit">Reserve my seat</button>
+        <button class="link-btn link-btn--dark" type="button" data-close>Not now</button>
+      </div>
+    </form>
+    <div class="seat__done" id="seatDone" hidden>
+      <h2 id="seatDoneTitle" tabindex="-1">Your pass is ready</h2>
+      <p id="seatStatus"></p>
+      <canvas class="pass" id="passCanvas" width="1080" height="1350" role="img" aria-label="Your NMMUN delegate pass"></canvas>
+      <div class="seat__actions">
+        <button class="cta cta--small" id="passDownload" type="button">Download my delegate pass</button>
+        <button class="link-btn link-btn--dark" type="button" data-close>Close</button>
+      </div>
+    </div>
   </dialog>
 
   <script src="js/globe-data.js" defer></script>
+  <script src="js/pass.js" defer></script>
   <script src="js/main.js" defer></script>
   <script src="js/globe.js" defer></script>
 </body>

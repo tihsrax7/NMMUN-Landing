@@ -1,13 +1,14 @@
 /* NMMUN'27 landing page script. No libraries.
-   Three small jobs: 1) the placard and countdown in the hero,
-   2) the committee matcher, 3) the register button. */
+   Jobs: 1) the placard, country brief and countdown in the hero, and the film in the overview,
+         2) the committee matcher,
+         3) the registration dialog (optionally saved to a Google Sheet).
+   The globe lives in globe.js and the delegate pass in pass.js. */
 
 // ---- Settings: change these when the official details are announced ----
 const EVENT_DATE = new Date("2027-01-16T09:00:00+05:30");
-const REGISTER_URL = ""; // paste the registration form link here when it is live
-
-const COUNTRIES = ["India", "Brazil", "Japan", "France", "Kenya", "Germany", "Egypt", "Mexico", "South Africa",
-  "United Kingdom", "Indonesia", "Argentina", "Nigeria", "Australia", "Canada", "Türkiye", "Norway", "Vietnam"];
+// Paste the web-app link of the Google Apps Script here to save registrations
+// to a Google Sheet (see backend/README.md). While it is empty, nothing is sent.
+const SHEET_URL = "";
 
 // Agendas are indicative. Committee mix follows recent NMMUN editions.
 const COMMITTEES = {
@@ -64,14 +65,30 @@ const store = {
   get(key) { try { return localStorage.getItem(key) || ""; } catch (e) { return ""; } },
   set(key, value) { try { localStorage.setItem(key, value); } catch (e) { /* private mode: ignore */ } }
 };
+const findCountry = (name) => COUNTRIES.find((c) => c.n === name);
 
-/* ---------- 1. Hero: placard and countdown ---------- */
+/* ---------- 1. Hero: placard, country brief and countdown ---------- */
+function fillCountrySelect(select, firstLabel) {
+  select.add(new Option(firstLabel, ""));
+  COUNTRIES.forEach((c) => select.add(new Option(c.n, c.n)));
+}
+
+function showBrief(country) {
+  $("brief").hidden = !country;
+  if (!country) return;
+  $("briefName").textContent = country.n;
+  $("briefCapital").textContent = country.cap;
+  $("briefRegion").textContent = country.sub;
+  $("briefGroup").textContent = country.grp;
+  $("briefBorders").textContent = country.nb === 0 ? "None. It has no land borders"
+    : country.nb + (country.nb === 1 ? " country" : " countries") + (country.ll ? ", and no coastline" : "");
+}
+
 function setupPlacard() {
   const nameInput = $("delegateName"), countrySelect = $("delegateCountry");
   const placard = document.querySelector(".placard");
 
-  countrySelect.add(new Option("Choose a country", ""));
-  COUNTRIES.forEach((c) => countrySelect.add(new Option(c, c)));
+  fillCountrySelect(countrySelect, "Choose a country");
   nameInput.value = store.get("nmmun-name");
   countrySelect.value = store.get("nmmun-country");
 
@@ -80,14 +97,15 @@ function setupPlacard() {
     $("placardCountry").textContent = countrySelect.value || "Your country";
     store.set("nmmun-name", nameInput.value.trim());
     store.set("nmmun-country", countrySelect.value);
-    if (animate) { // replay the small "stand the card up" movement
+    showBrief(findCountry(countrySelect.value));
+    if (animate) { // replay the small "card set down" movement
       placard.classList.remove("is-set");
       void placard.offsetWidth;
       placard.classList.add("is-set");
     }
   }
   nameInput.addEventListener("input", () => render(false));
-  countrySelect.addEventListener("change", () => render(true));
+  countrySelect.addEventListener("change", () => render(true)); // also fired by a click on the globe
   $("placardForm").addEventListener("submit", (e) => e.preventDefault());
   render(false);
 }
@@ -164,24 +182,106 @@ function setupQuiz() {
   showQuestion(false);
 }
 
-/* ---------- 3. Register button ---------- */
+/* ---------- 3. Registration dialog ---------- */
 function setupRegister() {
-  const dialog = $("seatDialog");
-  [$("registerBtn"), $("registerBtn2"), $("registerBtn3")].forEach((btn) => {
-    if (REGISTER_URL) { btn.href = REGISTER_URL; return; } // live link: just go there
-    btn.addEventListener("click", (e) => {
-      if (!dialog.showModal) return; // very old browser: fall back to the footer note
-      e.preventDefault();
-      const name = store.get("nmmun-name"), country = store.get("nmmun-country"), committee = store.get("nmmun-committee");
-      const who = name || "Delegate";
-      const where = [country && `representing ${country}`, committee && `in ${committee}`].filter(Boolean).join(" ");
-      $("seatText").textContent = where ? `${who}, ${where}.` : `${who}, pick a country on the placard and find your committee to complete your seat.`;
-      dialog.showModal();
-    });
+  const dialog = $("seatDialog"), form = $("seatForm");
+  if (!dialog.showModal) return; // very old browser: the buttons simply jump to the footer
+
+  fillCountrySelect($("seatCountry"), "Choose a country");
+  $("seatCommittee").add(new Option("Not sure yet", "Not decided"));
+  Object.values(COMMITTEES).forEach((c) => $("seatCommittee").add(new Option(c.name, c.name)));
+
+  function open(e) {
+    e.preventDefault();
+    // carry over what the visitor already chose on the page
+    $("seatName").value = store.get("nmmun-name");
+    $("seatCountry").value = store.get("nmmun-country");
+    $("seatCommittee").value = store.get("nmmun-committee") || "Not decided";
+    form.hidden = false;
+    $("seatDone").hidden = true;
+    dialog.showModal();
+  }
+  document.querySelectorAll("[data-register]").forEach((btn) => btn.addEventListener("click", open));
+  document.querySelectorAll("[data-close]").forEach((btn) => btn.addEventListener("click", () => dialog.close()));
+
+  form.addEventListener("submit", async (e) => {
+    e.preventDefault(); // the browser has already checked the required fields
+    const entry = {
+      name: $("seatName").value.trim(), email: $("seatEmail").value.trim(), college: $("seatCollege").value.trim(),
+      country: $("seatCountry").value, committee: $("seatCommittee").value
+    };
+    const button = $("seatSubmit");
+    button.disabled = true; button.textContent = "Reserving your seat";
+
+    let saved = false;
+    if (SHEET_URL) {
+      try {
+        // "no-cors" lets a plain web page post to Google Apps Script. The reply cannot be read,
+        // so reaching this line without an error is treated as sent.
+        await fetch(SHEET_URL, { method: "POST", mode: "no-cors", body: new URLSearchParams(entry) });
+        saved = true;
+      } catch (err) { saved = false; }
+    }
+    button.disabled = false; button.textContent = "Reserve my seat";
+
+    // keep the page in step with what was entered
+    $("delegateName").value = entry.name;
+    $("delegateCountry").value = entry.country;
+    $("delegateCountry").dispatchEvent(new Event("change"));
+    $("delegateName").dispatchEvent(new Event("input"));
+
+    $("seatStatus").textContent = saved
+      ? "Your details are with the organising team. We will write to you when allocations open."
+      : SHEET_URL
+        ? "We could not reach the registration sheet just now. Please try again in a minute. Your pass is still ready below."
+        : "Preview mode: registration opens with the official announcement, so nothing has been sent. Your pass is ready below.";
+    $("seatDoneTitle").textContent = saved ? "Your seat is reserved" : "Your pass is ready";
+    form.hidden = true;
+    $("seatDone").hidden = false;
+    await drawDelegatePass($("passCanvas"), entry); // from pass.js
+    $("seatDoneTitle").focus();
   });
+
+  $("passDownload").addEventListener("click", () => downloadDelegatePass($("passCanvas"), $("seatName").value));
+}
+
+/* ---------- Highlights film ---------- */
+// The film starts by itself when it scrolls into view and pauses when it scrolls away.
+// The only control is one play / pause button.
+function setupFilm() {
+  const film = $("film"), frame = film.parentElement, toggle = $("filmToggle"), sound = $("filmSound");
+  const calmMotion = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+  let pausedByVisitor = false;
+
+  async function start() {
+    // Browsers only allow a film to start by itself with sound after the visitor has clicked
+    // something on the page. So try with sound first, and fall back to starting silently.
+    try { film.muted = false; await film.play(); }
+    catch (err) {
+      try { film.muted = true; await film.play(); sound.hidden = false; } catch (err2) { /* playback not possible */ }
+    }
+  }
+
+  toggle.addEventListener("click", () => {
+    if (film.paused) { pausedByVisitor = false; start(); }
+    else { pausedByVisitor = true; film.pause(); }
+  });
+  sound.addEventListener("click", () => { film.muted = false; sound.hidden = true; });
+
+  film.addEventListener("play", () => { frame.classList.add("is-playing"); toggle.setAttribute("aria-label", "Pause the film"); });
+  film.addEventListener("pause", () => { frame.classList.remove("is-playing"); toggle.setAttribute("aria-label", "Play the film"); });
+  film.addEventListener("ended", () => { pausedByVisitor = true; film.load(); }); // back to the cover picture
+
+  if ("IntersectionObserver" in window && !calmMotion) {
+    new IntersectionObserver((entries) => {
+      if (entries[0].isIntersecting) { if (!pausedByVisitor) start(); }
+      else if (!film.paused) film.pause();
+    }, { threshold: 0.6 }).observe(frame);
+  }
 }
 
 setupPlacard();
+setupFilm();
 setupCountdown();
 buildFiles();
 setupQuiz();

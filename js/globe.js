@@ -1,21 +1,16 @@
 /* Hero globe: the Earth at night, drawn on a <canvas> with no libraries.
-   Coastlines and borders glow in gold, and big cities shine.
-   It turns slowly by itself. When the visitor picks a country on the
-   placard, it rotates to that country and marks it with a pin. */
+   - Coastlines and borders glow in gold and big cities shine.
+   - It turns slowly by itself. Drag it to turn it yourself.
+   - Point at a country to see its name; click it to put it on your placard.
+   - Choosing a country in the dropdown turns the globe to that country. */
 (function () {
   const canvas = document.getElementById("globe");
   if (!canvas || !canvas.getContext || typeof BORDERS === "undefined") return;
   const ctx = canvas.getContext("2d");
+  const tip = document.getElementById("globeTip");
+  const select = document.getElementById("delegateCountry");
   const RAD = Math.PI / 180;
   const reduceMotion = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
-
-  // Rough centre of each country in the placard list: [longitude, latitude]
-  const CENTRES = {
-    "India": [79, 22], "Brazil": [-52, -10], "Japan": [138, 37], "France": [2, 47], "Kenya": [38, 0],
-    "Germany": [10, 51], "Egypt": [30, 27], "Mexico": [-102, 23], "South Africa": [24, -29],
-    "United Kingdom": [-2, 54], "Indonesia": [117, -2], "Argentina": [-64, -35], "Nigeria": [8, 9],
-    "Australia": [134, -25], "Canada": [-100, 57], "Türkiye": [35, 39], "Norway": [9, 61], "Vietnam": [106, 16]
-  };
 
   // Big cities, used for the bright spots: [longitude, latitude]
   const CITIES = [[72.9,19.1],[77.2,28.6],[88.4,22.6],[80.3,13.1],[77.6,13],[67,24.9],[90.4,23.8],[116.4,39.9],[121.5,31.2],
@@ -26,41 +21,51 @@
     [-74,40.7],[-87.6,41.9],[-118.2,34.1],[-122.4,37.8],[-95.4,29.8],[-79.4,43.7],[-73.6,45.5],[-99.1,19.4],[-80.2,25.8],
     [-46.6,-23.6],[-43.2,-22.9],[-58.4,-34.6],[-70.7,-33.5],[-77,-12],[-74.1,4.7],[-66.9,10.5],[151.2,-33.9],[145,-37.8]];
 
-  // Pre-compute what never changes: sin/cos of every point's latitude
-  const cityRad = CITIES.map((c) => [c[0] * RAD, c[1] * RAD]);
-  const borders = BORDERS.map((line) => {
+  // Turn a flat list [lon, lat, lon, lat, ...] (degrees x10) into points ready for projecting.
+  // sin and cos of the latitude never change, so they are worked out once here.
+  function toPoints(list) {
     const pts = [];
-    for (let i = 0; i < line.length; i += 2) {
-      const lat = line[i + 1] / 10 * RAD;
-      pts.push({ lon: line[i] / 10 * RAD, sin: Math.sin(lat), cos: Math.cos(lat) });
+    for (let i = 0; i < list.length; i += 2) {
+      const lat = list[i + 1] / 10 * RAD;
+      pts.push({ lon: list[i] / 10 * RAD, sin: Math.sin(lat), cos: Math.cos(lat) });
     }
     return pts;
-  });
-  const cities = cityRad.map((c) => ({ lon: c[0], sin: Math.sin(c[1]), cos: Math.cos(c[1]) }));
-
-  // A soft glowing spot, drawn once and then stamped for every city
-  const glowSprite = document.createElement("canvas");
-  glowSprite.width = glowSprite.height = 64;
-  const g = glowSprite.getContext("2d");
-  const grad = g.createRadialGradient(32, 32, 0, 32, 32, 32);
-  grad.addColorStop(0, "rgba(255, 244, 214, 1)");
-  grad.addColorStop(0.18, "rgba(255, 214, 140, .75)");
-  grad.addColorStop(1, "rgba(255, 190, 90, 0)");
-  g.fillStyle = grad; g.fillRect(0, 0, 64, 64);
+  }
+  const borders = BORDERS.map(toPoints);
+  const cities = CITIES.map((c) => ({ lon: c[0] * RAD, sin: Math.sin(c[1] * RAD), cos: Math.cos(c[1] * RAD) }));
+  const outlines = new Map(); // country name -> its outline rings as points (made when first needed)
+  const outlineOf = (country) => {
+    if (!outlines.has(country.n)) outlines.set(country.n, country.r.map(toPoints));
+    return outlines.get(country.n);
+  };
 
   let size = 0;                 // canvas width in CSS pixels
   let lon0 = 45 * RAD;          // longitude facing the viewer
   let lat0 = 16 * RAD;          // tilt
   let sinLat0 = 0, cosLat0 = 1;
-  let target = null;            // [lon, lat] in radians when a country is chosen
+  let chosen = null;            // the selected country (an item of COUNTRIES)
+  let pin = null;               // its centre as a point
+  let following = false;        // true while the globe is turning towards the chosen country
+  let hovered = null;           // country under the pointer
+  let drag = null;              // { x, y, moved } while a finger or mouse is held down
+  let fling = 0;                // turning speed left over from a flick
+  let idleUntil = 0;            // no automatic spin before this time (after the visitor has dragged)
   let visible = true;
 
+  // Performance: the finished globe picture is kept on a hidden canvas ("scene").
+  // It is only redrawn when something actually changes (rotation, hover, choice, size).
+  // On slow devices the globe also switches to a lighter drawing mode by itself.
+  const scene = document.createElement("canvas");
+  const sctx = scene.getContext("2d");
+  let ratio = 1, sceneKey = "", lite = false, slowFrames = 0, tick = 0;
+
   function resize() {
-    const ratio = Math.min(window.devicePixelRatio || 1, 2);
+    ratio = Math.min(window.devicePixelRatio || 1, lite ? 1 : 2);
     size = canvas.clientWidth;
-    canvas.width = canvas.height = Math.round(size * ratio);
-    ctx.setTransform(ratio, 0, 0, ratio, 0, 0);
+    canvas.width = canvas.height = scene.width = scene.height = Math.round(size * ratio);
+    sceneKey = "";
   }
+  const centre = () => size / 2, radius = () => size * 0.43;
 
   // Orthographic projection: where a point on the sphere lands on the flat circle.
   // out.z > 0 means the point is on the side facing us.
@@ -73,9 +78,36 @@
     return out;
   }
 
-  function strokeBorders(c, r) {
+  // The same sum run backwards: which longitude and latitude is under a point on the canvas?
+  function unproject(px, py) {
+    const x = (px - centre()) / radius(), y = -(py - centre()) / radius();
+    const d = x * x + y * y;
+    if (d > 1) return null; // outside the globe
+    const z = Math.sqrt(1 - d);
+    const lat = Math.asin(Math.max(-1, Math.min(1, y * cosLat0 + z * sinLat0)));
+    let lon = lon0 + Math.atan2(x, z * cosLat0 - y * sinLat0);
+    lon = ((lon / RAD + 540) % 360) - 180;
+    return [lon * 10, lat / RAD * 10]; // same units as the map data
+  }
+
+  // Classic "ray casting" test: is the point inside this outline?
+  function inRing(ring, x, y) {
+    let inside = false;
+    for (let i = 0, j = ring.length - 2; i < ring.length; j = i, i += 2) {
+      const xi = ring[i], yi = ring[i + 1], xj = ring[j], yj = ring[j + 1];
+      if ((yi > y) !== (yj > y) && x < (xj - xi) * (y - yi) / (yj - yi) + xi) inside = !inside;
+    }
+    return inside;
+  }
+  function countryAt(px, py) {
+    const at = unproject(px, py);
+    if (!at) return null;
+    return COUNTRIES.find((c) => c.r.some((ring) => inRing(ring, at[0], at[1]))) || null;
+  }
+
+  function tracePath(ctx, lines, c, r, close) {
     ctx.beginPath();
-    for (const line of borders) {
+    for (const line of lines) {
       let drawing = false;
       for (const pt of line) {
         const p = project(pt);
@@ -83,13 +115,13 @@
         if (drawing) ctx.lineTo(c + p.x * r, c - p.y * r); else ctx.moveTo(c + p.x * r, c - p.y * r);
         drawing = true;
       }
+      if (close && drawing) ctx.closePath();
     }
-    ctx.stroke();
   }
 
-  function draw(time) {
-    const c = size / 2, r = size * 0.43;
-    sinLat0 = Math.sin(lat0); cosLat0 = Math.cos(lat0);
+  function drawScene(c, r) {
+    const ctx = sctx; // everything in this function is painted on the hidden canvas
+    ctx.setTransform(ratio, 0, 0, ratio, 0, 0);
     ctx.clearRect(0, 0, size, size);
     ctx.globalAlpha = 1;
 
@@ -107,27 +139,50 @@
     ctx.strokeStyle = "rgba(200, 165, 90, .32)";
     ctx.beginPath(); ctx.ellipse(c, c, r * 1.14, r * 0.3, -22 * RAD, 0, 7); ctx.stroke();
 
-    // coastlines and borders: a wide faint stroke under a thin bright one makes them glow
+    // the country under the pointer and the chosen country are filled in
     ctx.lineJoin = "round";
-    ctx.strokeStyle = "rgba(255, 190, 90, .16)"; ctx.lineWidth = Math.max(2.5, size / 150); strokeBorders(c, r);
-    ctx.strokeStyle = "rgba(255, 221, 160, .8)"; ctx.lineWidth = Math.max(0.6, size / 800); strokeBorders(c, r);
+    if (hovered && hovered !== chosen) { tracePath(ctx, outlineOf(hovered), c, r, true); ctx.fillStyle = "rgba(255, 255, 255, .12)"; ctx.fill(); }
+    if (chosen) { tracePath(ctx, outlineOf(chosen), c, r, true); ctx.fillStyle = "rgba(200, 165, 90, .34)"; ctx.fill(); }
 
-    // city lights
-    ctx.globalCompositeOperation = "lighter";
-    const glow = size / 26;
+    // coastlines and borders: a wide faint stroke under a thin bright one makes them glow
+    tracePath(ctx, borders, c, r, false);
+    if (!lite) { ctx.strokeStyle = "rgba(255, 190, 90, .16)"; ctx.lineWidth = Math.max(2.5, size / 150); ctx.stroke(); }
+    ctx.strokeStyle = "rgba(255, 221, 160, .8)"; ctx.lineWidth = Math.max(0.6, size / 800); ctx.stroke();
+
+    // city lights: three soft rings per city, each ring size painted in one go
+    // (stamping a glow picture per city looked the same but was about ten times slower)
+    const spots = [];
     for (const city of cities) {
       const p = project(city);
-      if (p.z <= 0.05) continue;
-      ctx.globalAlpha = 0.25 + p.z * 0.6;
-      const s = glow * (0.5 + p.z * 0.6);
-      ctx.drawImage(glowSprite, c + p.x * r - s / 2, c - p.y * r - s / 2, s, s);
+      if (p.z > 0.05) spots.push([c + p.x * r, c - p.y * r, (size / 60) * (0.5 + p.z * 0.6)]);
     }
-    ctx.globalCompositeOperation = "source-over";
-    ctx.globalAlpha = 1;
+    [[1, "rgba(255, 200, 110, .16)"], [0.55, "rgba(255, 214, 140, .38)"], [0.24, "rgba(255, 244, 214, .95)"]].forEach(([scale, colour]) => {
+      ctx.beginPath();
+      for (const s of spots) { ctx.moveTo(s[0] + s[2] * scale, s[1]); ctx.arc(s[0], s[1], s[2] * scale, 0, 7); }
+      ctx.fillStyle = colour; ctx.fill();
+    });
+  }
+
+  function draw(time) {
+    const c = centre(), r = radius();
+    sinLat0 = Math.sin(lat0); cosLat0 = Math.cos(lat0);
+    // redraw the globe picture only if something changed since the last frame
+    const key = [lon0.toFixed(4), lat0.toFixed(4), hovered && hovered.n, chosen && chosen.n, size, lite].join("|");
+    const changed = key !== sceneKey, started = performance.now();
+    if (changed) { drawScene(c, r); sceneKey = key; }
+    ctx.setTransform(1, 0, 0, 1, 0, 0);
+    ctx.clearRect(0, 0, canvas.width, canvas.height);
+    ctx.drawImage(scene, 0, 0); // the browser does the real painting work here
+    ctx.setTransform(ratio, 0, 0, ratio, 0, 0);
+    // three slow redraws in a row: switch to the lighter mode (thinner glow, fewer pixels)
+    if (changed && !lite) {
+      slowFrames = performance.now() - started > 12 ? slowFrames + 1 : 0;
+      if (slowFrames >= 3) { lite = true; resize(); }
+    }
 
     // pin on the chosen country
-    if (target) {
-      const p = project(target);
+    if (pin) {
+      const p = project(pin);
       if (p.z > 0) {
         const x = c + p.x * r, y = c - p.y * r;
         const pulse = reduceMotion ? 0.5 : (time / 1600) % 1;
@@ -142,30 +197,84 @@
 
   function frame(time) {
     if (visible) {
-      if (target) { // ease towards the chosen country, taking the shorter way round
-        let diff = (target.lon - lon0) % (2 * Math.PI);
+      if (following && pin && !drag) { // ease towards the chosen country, taking the shorter way round
+        let diff = (pin.lon - lon0) % (2 * Math.PI);
         if (diff > Math.PI) diff -= 2 * Math.PI;
         if (diff < -Math.PI) diff += 2 * Math.PI;
         lon0 += diff * 0.06;
-        lat0 += (target.lat * 0.6 - lat0) * 0.06;
-      } else {
-        lon0 += 0.0016; // slow idle spin
+        lat0 += (pin.lat * 0.6 - lat0) * 0.06;
+        if (Math.abs(diff) < 0.002) { following = false; idleUntil = time + 6000; } // rest on the country, then turn again
+      } else if (!drag && Math.abs(fling) > 0.0004) {
+        lon0 -= fling; fling *= 0.94;       // the globe keeps turning for a moment after a flick
+      } else if (!drag && time > idleUntil && tick % (lite ? 3 : 2) === 0) {
+        lon0 += lite ? 0.0048 : 0.0032; // slow spin on its own, moved on every second (or third) frame to save work
       }
+      tick += 1;
       draw(time);
     }
-    requestAnimationFrame(frame);
+    if (!reduceMotion) requestAnimationFrame(frame);
   }
 
   function setCountry(name) {
-    const centre = CENTRES[name];
-    target = centre ? { lon: centre[0] * RAD, lat: centre[1] * RAD, sin: Math.sin(centre[1] * RAD), cos: Math.cos(centre[1] * RAD) } : null;
+    chosen = COUNTRIES.find((c) => c.n === name) || null;
+    pin = chosen ? { lon: chosen.c[0] * RAD, lat: chosen.c[1] * RAD, sin: Math.sin(chosen.c[1] * RAD), cos: Math.cos(chosen.c[1] * RAD) } : null;
+    following = !!chosen;
     if (reduceMotion) { // no animation: jump straight there and draw once
-      if (target) { lon0 = target.lon; lat0 = target.lat * 0.6; }
+      if (pin) { lon0 = pin.lon; lat0 = pin.lat * 0.6; }
       draw(0);
     }
   }
 
-  const select = document.getElementById("delegateCountry");
+  /* ----- pointer: hover, drag and click ----- */
+  const local = (e) => { const b = canvas.getBoundingClientRect(); return [e.clientX - b.left, e.clientY - b.top]; };
+
+  canvas.addEventListener("pointerdown", (e) => {
+    const [x, y] = local(e);
+    if (!unproject(x, y)) return;          // pressed outside the sphere
+    drag = { x: e.clientX, y: e.clientY, moved: 0, speed: 0 };
+    fling = 0;
+    canvas.setPointerCapture(e.pointerId);
+    canvas.classList.add("is-dragging");
+  });
+
+  canvas.addEventListener("pointermove", (e) => {
+    const [x, y] = local(e);
+    if (drag) {
+      const dx = e.clientX - drag.x, dy = e.clientY - drag.y;
+      drag.x = e.clientX; drag.y = e.clientY; drag.moved += Math.abs(dx) + Math.abs(dy);
+      lon0 -= dx / radius();
+      drag.speed = dx / radius();
+      lat0 = Math.max(-1.2, Math.min(1.2, lat0 + dy / radius()));
+      following = false;
+      if (reduceMotion) draw(0);
+      return;
+    }
+    hovered = countryAt(x, y);
+    canvas.style.cursor = hovered ? "pointer" : unproject(x, y) ? "grab" : "";
+    tip.hidden = !hovered;
+    if (hovered) { tip.textContent = hovered.n; tip.style.left = x + "px"; tip.style.top = y + "px"; }
+    if (reduceMotion) draw(0);
+  });
+
+  canvas.addEventListener("pointerup", (e) => {
+    if (!drag) return;
+    const wasClick = drag.moved < 6;
+    if (!wasClick && !reduceMotion) fling = Math.max(-0.08, Math.min(0.08, drag.speed));
+    drag = null;
+    canvas.classList.remove("is-dragging");
+    idleUntil = performance.now() + 1500;
+    if (wasClick) {
+      const [x, y] = local(e);
+      const country = countryAt(x, y);
+      if (country) { // put the clicked country on the placard; main.js listens for this change
+        select.value = country.n;
+        select.dispatchEvent(new Event("change"));
+      }
+    }
+  });
+  canvas.addEventListener("pointercancel", () => { drag = null; canvas.classList.remove("is-dragging"); });
+  canvas.addEventListener("pointerleave", () => { hovered = null; tip.hidden = true; if (reduceMotion) draw(0); });
+
   select.addEventListener("change", () => setCountry(select.value));
   window.addEventListener("resize", () => { resize(); draw(0); });
   // stop drawing when the globe is scrolled out of view
